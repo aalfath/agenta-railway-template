@@ -104,59 +104,88 @@ def http(method, url, body=None, headers=None, timeout=30):
         return exc.code, exc.read().decode(errors="replace")
 
 
+def wait_http(urls, what, tries=300, delay=2):
+    """Return the first URL that answers 200 (tries * delay seconds at most)."""
+    for _ in range(tries):
+        for url in urls:
+            try:
+                if http("GET", url, timeout=5)[0] == 200:
+                    return url
+            except Exception:
+                pass
+        time.sleep(delay)
+    raise SystemExit(f"{what} did not answer; owner account not created")
+
+
+def ensure_owner(base, email, password):
+    """Create the owner (user, sign-in identity, organisation) once. Repairs a half-created
+    owner (Agenta user without a SuperTokens identity) instead of reporting success."""
+    auth = {"Authorization": "Access " + os.environ["AGENTA_AUTH_KEY"]}
+    identity = {"method": "email:password", "subject": email, "password": password}
+    payload = {"accounts": {"owner": {
+        "user": {"email": email},
+        "user_identities": [identity],
+        "options": {"seed_defaults": True, "create_identities": True},
+    }}}
+    status, text = http("POST", base + "/admin/simple/accounts/", payload, auth, timeout=120)
+    if status == 200:
+        try:
+            errors = json.loads(text).get("errors")
+        except Exception:
+            errors = None
+        if not errors:
+            return "created"
+        log(f"owner account created with errors, repairing: {json.dumps(errors)[:300]}")
+    elif status != 409:
+        raise RuntimeError(f"HTTP {status} {text[:300]}")
+    # The user exists: make sure it can sign in with the generated password.
+    status, text = http("POST", base + "/admin/simple/accounts/users/identities/",
+                        {"user_ref": {"email": email}, "user_identity": identity}, auth, timeout=60)
+    if status == 200:
+        return "sign-in identity added"
+    status, text = http("POST", base + "/admin/simple/accounts/reset-password",
+                        {"user_identities": [identity]}, auth, timeout=60)
+    if status in (200, 204):
+        return "already existed; password set"
+    raise RuntimeError(f"could not set the owner's password: HTTP {status} {text[:300]}")
+
+
 async def owner():
     email = (os.environ.get("AGENTA_ADMIN_EMAIL") or "").strip().lower()
     password = os.environ.get("AGENTA_ADMIN_PASSWORD") or ""
     if not email or not password:
         log("AGENTA_ADMIN_EMAIL / AGENTA_ADMIN_PASSWORD not set; skipping the owner account")
         return
+    flag = "owner_created:" + email
     conn = await connect()
     try:
-        if await kv_get(conn, "owner_created"):
+        if await kv_get(conn, flag):
             return
-        base = None
-        for _ in range(150):
-            for cand in ("http://127.0.0.1:8000", "http://[::1]:8000"):
-                try:
-                    if http("GET", cand + "/health", timeout=5)[0] == 200:
-                        base = cand
-                        break
-                except Exception:
-                    pass
-            if base:
-                break
-            await asyncio.sleep(2)
-        if not base:
-            raise SystemExit("API did not answer /health; owner account not created")
-        payload = {
-            "accounts": {
-                "owner": {
-                    "user": {"email": email},
-                    "user_identities": [
-                        {"method": "email:password", "subject": email, "password": password}
-                    ],
-                    "options": {"seed_defaults": True, "create_identities": True},
-                }
-            }
-        }
-        status, text = http(
-            "POST", base + "/admin/simple/accounts/", payload,
-            {"Authorization": "Access " + os.environ["AGENTA_AUTH_KEY"]}, timeout=120,
-        )
-        if status == 200:
-            try:
-                errors = json.loads(text).get("errors")
-            except Exception:
-                errors = None
-            if errors:
-                raise SystemExit(f"owner account not created: {json.dumps(errors)[:500]}")
-        if status in (200, 409):
-            await kv_set(conn, "owner_created", email)
-            log(f"owner account ready: {email}" + (" (already existed)" if status == 409 else ""))
-        else:
-            raise SystemExit(f"owner account not created: HTTP {status} {text[:500]}")
     finally:
         await conn.close()
+    base = wait_http(["http://127.0.0.1:8000/health", "http://[::1]:8000/health"], "the API")
+    base = base.rsplit("/health", 1)[0]
+    # On a first deploy SuperTokens' private DNS name may not resolve yet: wait for it.
+    st = os.environ.get("SUPERTOKENS_URI_CORE") or os.environ.get("SUPERTOKENS_CONNECTION_URI")
+    if st:
+        wait_http([st.rstrip("/") + "/hello"], "SuperTokens", tries=200, delay=3)
+    last = None
+    for attempt in range(10):
+        try:
+            result = ensure_owner(base, email, password)
+            break
+        except Exception as exc:
+            last = exc
+            log(f"owner account attempt {attempt + 1} failed: {exc}")
+            time.sleep(10)
+    else:
+        raise SystemExit(f"owner account not created: {last}")
+    conn = await connect()
+    try:
+        await kv_set(conn, flag, "1")
+    finally:
+        await conn.close()
+    log(f"owner account ready: {email} ({result})")
 
 
 if __name__ == "__main__":
