@@ -8,7 +8,7 @@ USER root
 RUN grep -q 'or "phc_' /app/oss/src/utils/env.py \
  && sed -i -E 's/or "phc_[A-Za-z0-9]+"/or None/' /app/oss/src/utils/env.py \
  && ! grep -q '"phc_' /app/oss/src/utils/env.py
-COPY --chmod=755 env.sh start.sh bootstrap.py /railway/
+COPY --chmod=755 env.sh start.sh serve.py bootstrap.py /railway/
 USER 10001
 ENV AGENTA_LICENSE=oss
 ENTRYPOINT []

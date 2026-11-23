@@ -7,7 +7,7 @@ set -u
 export SCRIPT_NAME=/services
 W="${AGENTA_SERVICES_WORKERS:-1}"
 if [ "$W" -le 1 ]; then
-  uvicorn entrypoints.main:app --host :: --port 8080 --timeout-keep-alive 620 --log-level info
+  python /railway/serve.py 8080 entrypoints.main:app --timeout-keep-alive 620 --log-level info
 else
   gunicorn entrypoints.main:app \
     --bind "[::]:8080" \

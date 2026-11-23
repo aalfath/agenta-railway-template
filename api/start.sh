@@ -25,8 +25,7 @@ case "$ROLE" in
     W="${AGENTA_API_WORKERS:-1}"
     if [ "$W" -le 1 ]; then
       # One process (no gunicorn master) keeps the API about 60 MB lighter at 0.5 GB.
-      uvicorn entrypoints.routers:app --host :: --port 8000 \
-        --timeout-keep-alive 620 --log-level info &
+      python /railway/serve.py 8000 entrypoints.routers:app --timeout-keep-alive 620 --log-level info &
     else
       gunicorn entrypoints.routers:app \
         --bind "[::]:8000" \
