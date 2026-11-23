@@ -1,0 +1,70 @@
+# Rendered by the nginx entrypoint. Upstream hosts are Railway private domains, resolved on
+# every request (variable proxy_pass) so a redeployed service's new address is picked up.
+resolver ${NGINX_LOCAL_RESOLVERS} valid=5s;
+
+server {
+    listen ${PORT};
+    listen [::]:${PORT};
+
+    client_max_body_size 32m;
+    proxy_connect_timeout 10s;
+    proxy_read_timeout 120s;
+    proxy_send_timeout 120s;
+    # Session refresh emits large Set-Cookie headers.
+    proxy_buffer_size 32k;
+    proxy_buffers 8 32k;
+    proxy_busy_buffers_size 64k;
+
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header Connection "";
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location /api/ {
+        set $api_upstream "${API_HOST}:8000";
+        rewrite ^/api/(.*)$ /$1 break;
+        proxy_pass http://$api_upstream;
+        proxy_buffering off;
+    }
+
+    location = /api/tools/call {
+        set $api_upstream "${API_HOST}:8000";
+        rewrite ^/api/(.*)$ /$1 break;
+        proxy_pass http://$api_upstream;
+        proxy_read_timeout 1820s;
+    }
+
+    location ~ ^/services/.+/invoke$ {
+        set $services_upstream "${SERVICES_HOST}:8080";
+        rewrite ^/services/(.*)$ /$1 break;
+        proxy_pass http://$services_upstream;
+        proxy_buffering off;
+        proxy_read_timeout 1820s;
+    }
+
+    location /services/ {
+        set $services_upstream "${SERVICES_HOST}:8080";
+        rewrite ^/services/(.*)$ /$1 break;
+        proxy_pass http://$services_upstream;
+        proxy_buffering off;
+    }
+
+    # Mobile app: built with basePath /m, so the prefix is NOT stripped.
+    location ~ ^/m(/|$) {
+        set $web_mobile_upstream "${WEB_MOBILE_HOST}:3000";
+        proxy_pass http://$web_mobile_upstream;
+    }
+
+    location / {
+        set $web_upstream "${WEB_HOST}:3000";
+        proxy_pass http://$web_upstream;
+    }
+}
