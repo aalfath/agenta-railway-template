@@ -1,3 +1,5 @@
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template/agenta?utm_medium=integration&utm_source=button&utm_campaign=agenta)
+
 # Agenta on Railway
 
 One-click Railway template for [Agenta](https://github.com/Agenta-AI/agenta) **v0.131.0** (open-source edition, MIT),
@@ -14,13 +16,22 @@ pinned by version **and** digest.
 | `gateway` | `gateway/` | nginx 1.30.7: the one public URL. `/` web app, `/m` mobile app, `/api` API, `/services` playground runtime. Health `/healthz`. |
 | `web` | `web/` | Agenta web app (Next.js). |
 | `web-mobile` | `web-mobile/` | Agenta mobile web app at `/m` (signed-out visitors land on its sign-in page). |
-| `api` | `api/` | FastAPI backend. Creates the databases, runs migrations under a Postgres lock, creates the owner account on first boot. Health `/health`. |
+| `api` | `api/` | FastAPI backend (single uvicorn process at one worker). Creates the databases, runs migrations under a Postgres lock, creates the owner account on first boot. Health `/health`. |
 | `worker-streams`, `worker-queues` | `api/` | Background workers (trace ingestion, evaluations), same image, `AGENTA_ROLE` picks the process. |
 | `cron` | `api/` | Scheduled evaluation and trigger refreshes (supercronic). |
 | `services` | `services/` | Playground and workflow runtime that calls your LLM provider. Health `/health`. |
 | `supertokens` | `supertokens/` | SuperTokens core, the sign-in backend. Health `/hello`. |
 | `Postgres` | Railway Postgres | Agenta core, tracing and SuperTokens data (volume). |
 | `Redis` | Railway Redis | Caches, streams and queues (volume). |
+
+## After deploy
+
+1. Open the `gateway` service's URL and sign in with your `AGENTA_ADMIN_EMAIL` and the generated
+   `AGENTA_ADMIN_PASSWORD` (the `api` service's Variables tab).
+2. Add an LLM provider key under **Settings → Model hub** (OpenAI, Anthropic, Gemini, Mistral, Groq or any
+   OpenAI-compatible endpoint), then open the playground.
+3. To trace your app, create an API key under **Settings → API keys** and point the SDK at
+   `https://YOUR-DOMAIN` (`ag.init(host=..., api_key=...)`).
 
 ## Variables
 
@@ -38,8 +49,11 @@ LLM provider keys (OpenAI, Anthropic, any OpenAI-compatible endpoint) are added 
 
 ## Memory
 
-Each service fits Railway's 0.5 GB per-service limit (Free plan). Python services run one gunicorn worker;
-raise `AGENTA_API_WORKERS` / `AGENTA_SERVICES_WORKERS` on bigger plans.
+Every service runs inside Railway's 0.5 GB / 1 vCPU per-service limit (Free plan). Measured on Railway with
+traces ingested and a playground run: api about 450 MB, worker-queues 330 MB, worker-streams 310 MB,
+services 230 MB, supertokens 225 MB, web and web-mobile 130 MB each. The API is the tightest; on Hobby or
+higher give it 1 GB and set `AGENTA_API_WORKERS=2` (or `AGENTA_SERVICES_WORKERS`) for more throughput.
+Every start script exits non-zero when its process stops, so Railway's on-failure restart brings it back.
 
 ## Not included
 
@@ -47,6 +61,8 @@ raise `AGENTA_API_WORKERS` / `AGENTA_SERVICES_WORKERS` on bigger plans.
   above the 4 GB image limit of Railway's Free and Trial plans, and its durable workspace needs FUSE, which
   Railway containers don't have. Prompt playground, evaluations and observability don't need it.
 - **SeaweedFS object store**: only the agent runner's file mounts use it.
+- Analytics: upstream sends usage events to Agenta's PostHog unless told otherwise; this template removes that
+  default, so nothing is sent unless you set `POSTHOG_API_KEY`.
 - Email (SMTP/SendGrid), Google/GitHub sign-in and Composio tools: optional, set upstream's variables on
   `api`, `web` and `web-mobile` if you want them.
 
