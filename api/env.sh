@@ -51,3 +51,5 @@ fi
 # Keep Python's allocator and thread pools small inside a 0.5 GB / 1 vCPU service.
 export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-2}"
 export PYTHONUNBUFFERED=1
+# Use the model price list bundled with LiteLLM instead of downloading it at every start.
+export LITELLM_LOCAL_MODEL_COST_MAP="${LITELLM_LOCAL_MODEL_COST_MAP:-True}"

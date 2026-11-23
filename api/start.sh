@@ -22,13 +22,20 @@ case "$ROLE" in
     AGENTA_STORE_JWT_PRIVATE_KEY="$(cat /tmp/agenta-store-key.pem)"
     export AGENTA_STORE_JWT_PRIVATE_KEY
     rm /tmp/agenta-store-key.pem
-    gunicorn entrypoints.routers:app \
-      --bind "[::]:8000" \
-      --worker-class entrypoints.uvicorn_worker.DrainingUvicornWorker \
-      --workers "${AGENTA_API_WORKERS:-1}" \
-      --max-requests 100000 --max-requests-jitter 10000 \
-      --timeout 60 --graceful-timeout 30 \
-      --log-level info --access-logfile - --error-logfile - &
+    W="${AGENTA_API_WORKERS:-1}"
+    if [ "$W" -le 1 ]; then
+      # One process (no gunicorn master) keeps the API about 60 MB lighter at 0.5 GB.
+      uvicorn entrypoints.routers:app --host :: --port 8000 \
+        --timeout-keep-alive 620 --log-level info &
+    else
+      gunicorn entrypoints.routers:app \
+        --bind "[::]:8000" \
+        --worker-class entrypoints.uvicorn_worker.DrainingUvicornWorker \
+        --workers "$W" \
+        --max-requests 100000 --max-requests-jitter 10000 \
+        --timeout 60 --graceful-timeout 30 \
+        --log-level info --access-logfile - --error-logfile - &
+    fi
     GPID=$!
     ( python /railway/bootstrap.py --owner || echo "[railway] owner bootstrap failed; see above" >&2 ) &
     wait "$GPID"
